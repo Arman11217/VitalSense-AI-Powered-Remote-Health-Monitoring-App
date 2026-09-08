@@ -1,0 +1,177 @@
+{
+  "rules": {
+    // ============================================================
+    // VitalSense — Firebase Realtime Database Security Rules
+    // ============================================================
+    // Schema overview:
+    //   /users/{uid}                          -> user profile (read: owner, write: owner)
+    //   /users/{uid}/devices/{deviceId}       -> device ownership map (read/write: owner)
+    //   /devices/{deviceId}/meta              -> device metadata (read: owner, write: device token)
+    //   /devices/{deviceId}/readings/{pushId} -> vital readings (read: owner, write: device token)
+    //   /devices/{deviceId}/ecg/{pushId}      -> raw ECG samples (read: owner, write: device token)
+    //   /devices/{deviceId}/predictions/{pid} -> AI prediction snapshots (read: owner, write: server)
+    //   /devices/{deviceId}/emergency         -> SOS state (read: owner, write: device token)
+    //   /contacts/{uid}/{contactId}           -> emergency contacts (read/write: owner)
+    //
+    // Auth model:
+    //   - End users authenticate with Firebase Auth (email/password).
+    //   - The ESP32 device authenticates with a per-device secret token
+    //     passed via a custom auth claim OR a server-side service account.
+    //     For this prototype we model the device as a logged-in user
+    //     whose UID equals the deviceId and whose custom claim
+    //     `device: true` is set by an admin SDK call after pairing.
+    // ============================================================
+
+    "users": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null && auth.uid === $uid",
+        ".validate": "newData.hasChildren(['email'])",
+
+        "profile": {
+          ".validate": "
+            (!newData.hasChildren(['displayName']) || newData.child('displayName').isString()) &&
+            (!newData.hasChildren(['photoUrl'])     || newData.child('photoUrl').val().beginsWith('https://')) &&
+            (!newData.hasChildren(['age'])          || (newData.child('age').isNumber() && newData.child('age').val() >= 0 && newData.child('age').val() <= 130)) &&
+            (!newData.hasChildren(['bloodGroup'])   || newData.child('bloodGroup').isString()) &&
+            (!newData.hasChildren(['phone'])        || newData.child('phone').isString())
+          "
+        },
+
+        "devices": {
+          "$deviceId": {
+            // A user can register/unregister their own device mapping.
+            ".write": "auth != null && auth.uid === $uid",
+            ".validate": "newData.hasChildren(['pairedAt'])"
+          }
+        },
+
+        "contacts": {
+          "$contactId": {
+            ".read": "auth != null && auth.uid === $uid",
+            ".write": "auth != null && auth.uid === $uid",
+            ".validate": "
+              newData.hasChildren(['name', 'phone']) &&
+              newData.child('name').isString() &&
+              newData.child('phone').isString() &&
+              (!newData.hasChildren(['relation']) || newData.child('relation').isString())
+            "
+          }
+        }
+      }
+    },
+
+    "devices": {
+      "$deviceId": {
+
+        "meta": {
+          ".read": "
+            auth != null && (
+              root.child('users').child(auth.uid).child('devices').child($deviceId).exists() ||
+              (auth.token.device === true && auth.uid === $deviceId)
+            )
+          ",
+          ".write": "auth.token.device === true && auth.uid === $deviceId",
+          ".validate": "
+            newData.hasChildren(['deviceId', 'firmwareVersion', 'lastSeen']) &&
+            newData.child('deviceId').val() === $deviceId &&
+            newData.child('firmwareVersion').isString() &&
+            newData.child('lastSeen').isNumber()
+          "
+        },
+
+        "readings": {
+          "$readingId": {
+            ".read": "
+              auth != null && (
+                root.child('users').child(auth.uid).child('devices').child($deviceId).exists() ||
+                (auth.token.device === true && auth.uid === $deviceId)
+              )
+            ",
+            ".write": "auth.token.device === true && auth.uid === $deviceId",
+            ".validate": "
+              newData.hasChildren(['timestamp', 'heartRateBpm', 'spo2Percent', 'temperatureC']) &&
+              newData.child('timestamp').isNumber() &&
+              newData.child('heartRateBpm').isNumber() &&
+              newData.child('heartRateBpm').val() >= 20 && newData.child('heartRateBpm').val() <= 260 &&
+              newData.child('spo2Percent').isNumber() &&
+              newData.child('spo2Percent').val() >= 0 && newData.child('spo2Percent').val() <= 100 &&
+              newData.child('temperatureC').isNumber() &&
+              newData.child('temperatureC').val() >= 25.0 && newData.child('temperatureC').val() <= 45.0
+            "
+          }
+        },
+
+        "ecg": {
+          "$sampleId": {
+            ".read": "
+              auth != null && (
+                root.child('users').child(auth.uid).child('devices').child($deviceId).exists() ||
+                (auth.token.device === true && auth.uid === $deviceId)
+              )
+            ",
+            ".write": "auth.token.device === true && auth.uid === $deviceId",
+            ".validate": "
+              newData.hasChildren(['timestamp', 'samples']) &&
+              newData.child('timestamp').isNumber() &&
+              newData.child('samples').isString()
+            "
+          }
+        },
+
+        "predictions": {
+          "$predictionId": {
+            // Only the trusted AI backend (admin SDK bypasses rules, but if
+            // using a per-device token we restrict writes accordingly).
+            ".read": "
+              auth != null && (
+                root.child('users').child(auth.uid).child('devices').child($deviceId).exists() ||
+                (auth.token.device === true && auth.uid === $deviceId) ||
+                auth.token.admin === true
+              )
+            ",
+            ".write": "auth.token.admin === true || auth.token.ai_service === true",
+            ".validate": "
+              newData.hasChildren(['timestamp', 'healthScore', 'riskLevel']) &&
+              newData.child('timestamp').isNumber() &&
+              newData.child('healthScore').isNumber() &&
+              newData.child('healthScore').val() >= 0 && newData.child('healthScore').val() <= 100 &&
+              newData.child('riskLevel').isString() &&
+              (newData.child('riskLevel').val() === 'low' ||
+               newData.child('riskLevel').val() === 'moderate' ||
+               newData.child('riskLevel').val() === 'high' ||
+               newData.child('riskLevel').val() === 'critical' ||
+               newData.child('riskLevel').val() === 'unknown')
+            "
+          }
+        },
+
+        "emergency": {
+          ".read": "
+            auth != null && (
+              root.child('users').child(auth.uid).child('devices').child($deviceId).exists() ||
+              (auth.token.device === true && auth.uid === $deviceId)
+            )
+          ",
+          ".write": "auth.token.device === true && auth.uid === $deviceId",
+          ".validate": "
+            newData.hasChildren(['active', 'timestamp']) &&
+            newData.child('active').isBoolean() &&
+            newData.child('timestamp').isNumber()
+          "
+        },
+
+        "$other": {
+          ".read": false,
+          ".write": false
+        }
+      }
+    },
+
+    // Top-level fallback: nothing else is writable.
+    "$other": {
+      ".read": false,
+      ".write": false
+    }
+  }
+}

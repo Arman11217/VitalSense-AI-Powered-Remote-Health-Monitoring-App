@@ -1,0 +1,5 @@
+# Asset folders
+
+This folder exists so `flutter pub get` can resolve asset paths declared
+in `pubspec.yaml`. Drop your image files (logo.png, onboarding_*.svg, …)
+in here later.

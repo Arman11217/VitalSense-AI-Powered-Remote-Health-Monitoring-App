@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "762777377782",
+    "project_id": "ai-health-monitoring-app",
+    "storage_bucket": "ai-health-monitoring-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:762777377782:android:a81b908c2c51ef114cc5d7",
+        "android_client_info": {
+          "package_name": "com.example.ai_powered_health_monitoring_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBbYqyeAbpGdY4QEG-njfBJ8AvEI1DsZ5Q"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
